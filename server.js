@@ -1,32 +1,38 @@
 // server.js
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
+const mongoose = require('mongoose');
 require('dotenv').config();
 
+// Modelo User
 const User = require('./models/User');
 
 const app = express();
 
 // Middlewares
 app.use(cors());
-app.use(express.urlencoded({ extended: true })); // para form-encode
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // Conexión a MongoDB
+const MONGO_URI = process.env.MONGO_URI;
+
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
   .then(() => console.log('MongoDB conectado'))
   .catch((err) => console.error('Error conectando a MongoDB:', err));
 
-// Ruta raíz (solo para ver que el server funciona)
+// RUTA RAÍZ (opcional, para probar que el servidor está vivo)
 app.get('/', (req, res) => {
-  res.send('Exercise Tracker API funcionando');
+  res.send('Exercise Tracker API funcionando 🚀');
 });
 
-//////////////////////
-//   RUTAS USERS    //
-//////////////////////
+// ======================
+//   RUTAS FCC
+// ======================
 
 // Crear usuario
 app.post('/api/users', async (req, res) => {
@@ -34,72 +40,63 @@ app.post('/api/users', async (req, res) => {
     const { username } = req.body;
 
     if (!username) {
-      return res.status(400).json({ error: 'username es obligatorio' });
+      return res.status(400).json({ error: 'Username es obligatorio' });
     }
 
-    const newUser = new User({ username });
-    const saved = await newUser.save();
+    const newUser = new User({ username, log: [] });
+    await newUser.save();
 
     res.json({
-      username: saved.username,
-      _id: saved._id,
+      username: newUser.username,
+      _id: newUser._id,
     });
   } catch (err) {
     console.error('ERROR AL CREAR USUARIO:', err);
-    res.status(500).json({ error: 'Error del servidor' });
+    res.status(500).json({ error: 'Error creando usuario' });
   }
 });
 
-// Obtener todos los usuarios
+// Listar usuarios
 app.get('/api/users', async (req, res) => {
   try {
     const users = await User.find({}, 'username _id');
     res.json(users);
   } catch (err) {
-    console.error('ERROR AL OBTENER USUARIOS:', err);
-    res.status(500).json({ error: 'Error del servidor' });
+    console.error('ERROR OBTENIENDO USUARIOS:', err);
+    res.status(500).json({ error: 'Error obteniendo usuarios' });
   }
 });
 
-////////////////////////
-//   RUTAS EXERCISES  //
-////////////////////////
-
-// Agregar ejercicio a un usuario
+// Agregar ejercicio
 app.post('/api/users/:_id/exercises', async (req, res) => {
   try {
-    const userId = (req.params._id || '').trim();
+    const { _id } = req.params;
     const { description, duration, date } = req.body;
 
-    // Buscar usuario
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
-
     if (!description || !duration) {
-      return res
-        .status(400)
-        .json({ error: 'description y duration son obligatorios' });
+      return res.status(400).json({ error: 'description y duration son obligatorios' });
     }
 
-    const exerciseDate = date ? new Date(date) : new Date();
+    const user = await User.findById(_id);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const parsedDate = date ? new Date(date) : new Date();
 
     const exercise = {
       description,
-      duration: Number(duration),
-      date: exerciseDate,
+      duration: parseInt(duration),
+      date: parsedDate,
     };
 
     user.log.push(exercise);
     await user.save();
 
     res.json({
-      username: user.username,
-      description: exercise.description,
-      duration: exercise.duration,
-      date: exercise.date.toDateString(),
       _id: user._id,
+      username: user.username,
+      date: exercise.date.toDateString(),
+      duration: exercise.duration,
+      description: exercise.description,
     });
   } catch (err) {
     console.error('ERROR AL AGREGAR EJERCICIO:', err);
@@ -107,64 +104,54 @@ app.post('/api/users/:_id/exercises', async (req, res) => {
   }
 });
 
-//////////////////////
-//   RUTA LOGS      //
-//////////////////////
-
-// Obtener logs de un usuario (con from, to, limit)
+// Obtener logs
 app.get('/api/users/:_id/logs', async (req, res) => {
   try {
-    const userId = (req.params._id || '').trim();
+    const { _id } = req.params;
     let { from, to, limit } = req.query;
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
+    const user = await User.findById(_id);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    let log = user.log;
+    let logs = user.log;
 
-    // Filtros de fecha
     if (from) {
       const fromDate = new Date(from);
-      if (!isNaN(fromDate)) {
-        log = log.filter((e) => e.date >= fromDate);
-      }
+      logs = logs.filter((e) => e.date >= fromDate);
     }
 
     if (to) {
       const toDate = new Date(to);
-      if (!isNaN(toDate)) {
-        log = log.filter((e) => e.date <= toDate);
-      }
+      logs = logs.filter((e) => e.date <= toDate);
     }
 
-    // Limit
     if (limit) {
-      limit = Number(limit);
-      if (!isNaN(limit)) {
-        log = log.slice(0, limit);
-      }
+      limit = parseInt(limit);
+      logs = logs.slice(0, limit);
     }
 
-    const logFormatted = log.map((e) => ({
+    const logMapped = logs.map((e) => ({
       description: e.description,
       duration: e.duration,
       date: e.date.toDateString(),
     }));
 
     res.json({
-      username: user.username,
-      count: logFormatted.length,
       _id: user._id,
-      log: logFormatted,
+      username: user.username,
+      count: logMapped.length,
+      log: logMapped,
     });
   } catch (err) {
-    console.error('ERROR AL OBTENER LOGS:', err);
+    console.error('ERROR OBTENIENDO LOGS:', err);
     res.status(500).json({ error: 'Error obteniendo logs' });
   }
 });
 
-// Levantar servidor
+// ======================
+//   LEVANTAR SERVIDOR
+// ======================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor escuchando en el puerto ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Servidor escuchando en el puerto ${PORT}`);
+});
